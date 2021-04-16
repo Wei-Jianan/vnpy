@@ -272,6 +272,10 @@ class BitmexRestApi(RestClient):
         # Only add price for limit order.
         if req.type == OrderType.LIMIT:
             data["price"] = req.price
+
+            # TODO
+            # "execInst": "ParticipateDoNotInitiate",
+            inst.append("ParticipateDoNotInitiate")
         elif req.type == OrderType.STOP:
             data["stopPx"] = req.price
             inst.append("LastPrice")

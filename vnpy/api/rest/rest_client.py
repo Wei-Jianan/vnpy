@@ -126,7 +126,9 @@ class RestClient(object):
 
         self._active = True
         self._pool = Pool(n)
-        self._pool.apply_async(self._run)
+        # TODO
+        for _ in range(n):
+            self._pool.apply_async(self._run)
 
     def stop(self) -> None:
         """
