@@ -445,6 +445,7 @@ class ArrayManager(object):
         self.close_array: np.ndarray = np.zeros(size)
         self.volume_array: np.ndarray = np.zeros(size)
         self.open_interest_array: np.ndarray = np.zeros(size)
+        self.ln_return_array = np.zeros(size)
 
     def update_bar(self, bar: BarData) -> None:
         """
@@ -461,12 +462,18 @@ class ArrayManager(object):
         self.volume_array[:-1] = self.volume_array[1:]
         self.open_interest_array[:-1] = self.open_interest_array[1:]
 
+        self.ln_return_array[:-1] = self.ln_return_array[1:]
+
         self.open_array[-1] = bar.open_price
         self.high_array[-1] = bar.high_price
         self.low_array[-1] = bar.low_price
         self.close_array[-1] = bar.close_price
         self.volume_array[-1] = bar.volume
         self.open_interest_array[-1] = bar.open_interest
+        if self.close_array[-2] > 0:
+            self.ln_return_array[-1] = np.log(bar.close_price)  - np.log(self.close_array[-2])
+        else:
+            self.ln_return_array[-1] = 0
 
     @property
     def open(self) -> np.ndarray:
@@ -644,6 +651,12 @@ class ArrayManager(object):
         Standard deviation.
         """
         result = talib.STDDEV(self.close, n, nbdev)
+        if array:
+            return result
+        return result[-1]
+
+    def var(self, n, nbdev=1, array=False):
+        result = talib.STDDEV(self.ln_return_array, n, nbdev)
         if array:
             return result
         return result[-1]
