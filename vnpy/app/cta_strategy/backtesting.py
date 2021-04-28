@@ -7,6 +7,7 @@ from time import time
 import multiprocessing
 import random
 import traceback
+from typing import Sequence
 
 import numpy as np
 from pandas import DataFrame
@@ -1060,6 +1061,18 @@ class BacktestingEngine:
             self.cancel_stop_order(strategy, vt_orderid)
         else:
             self.cancel_limit_order(strategy, vt_orderid)
+
+    def cancel_orders(self, strategy: CtaTemplate, vt_orderids: Sequence[str]):
+        """
+        Cancel order by vt_orderid.
+        """
+        for vt_orderid in vt_orderids:
+            if vt_orderid.startswith(STOPORDER_PREFIX):
+                self.cancel_stop_order(strategy, vt_orderid)
+            else:
+                self.cancel_limit_order(strategy, vt_orderid)
+
+
 
     def cancel_stop_order(self, strategy: CtaTemplate, vt_orderid: str):
         """"""

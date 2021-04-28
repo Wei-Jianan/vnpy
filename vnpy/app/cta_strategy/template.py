@@ -259,7 +259,11 @@ class CtaTemplate(ABC):
         """
         if self.trading:
             self.cta_engine.cancel_order(self, vt_orderid)
-
+    
+    def cancel_orders(self, vt_orderids):
+        if self.trading:
+            self.cta_engine.cancel_orders(self, vt_orderids)
+ 
     def cancel_all(self):
         """
         Cancel all orders sent by strategy.

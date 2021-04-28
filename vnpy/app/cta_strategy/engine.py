@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from tzlocal import get_localzone
+from typing import Sequence
 
 from vnpy.event import Event, EventEngine
 from vnpy.trader.engine import BaseEngine, MainEngine
@@ -443,6 +444,22 @@ class CtaEngine(BaseEngine):
 
         req = order.create_cancel_request()
         self.main_engine.cancel_order(req, order.gateway_name)
+        
+
+    def cancel_server_orders(self, strategy: CtaTemplate, vt_orderids: Sequence[str]):
+        """
+        Cancel existing bulk order by vt_orderid.
+        """
+        reqs = []
+        for vt_orderid in vt_orderids:
+            order = self.main_engine.get_order(vt_orderid)
+            if not order:
+                self.write_log(f"撤单失败，找不到委托{vt_orderid}", strategy)
+                continue
+            req = order.create_cancel_request()
+            reqs.append(req)
+        self.main_engine.cancel_orders(reqs, order.gateway_name)
+
 
     def cancel_local_stop_order(self, strategy: CtaTemplate, stop_orderid: str):
         """
@@ -509,6 +526,17 @@ class CtaEngine(BaseEngine):
             self.cancel_local_stop_order(strategy, vt_orderid)
         else:
             self.cancel_server_order(strategy, vt_orderid)
+
+    def cancel_orders(self, strategy: CtaTemplate, vt_orderids: Sequence[str]):
+        """
+        """
+        if vt_orderids[0].startswith(STOPORDER_PREFIX):
+            # TODO not support stop order for now
+            for vt_orderid in vt_orderids:
+                self.cancel_local_stop_order(strategy, vt_orderid)
+        else:
+            self.cancel_server_orders(strategy, vt_orderids)
+
 
     def cancel_all(self, strategy: CtaTemplate):
         """
