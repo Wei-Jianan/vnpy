@@ -451,6 +451,7 @@ class CtaEngine(BaseEngine):
         Cancel existing bulk order by vt_orderid.
         """
         reqs = []
+        order_gateway_name = None
         for vt_orderid in vt_orderids:
             order = self.main_engine.get_order(vt_orderid)
             if not order:
@@ -459,7 +460,8 @@ class CtaEngine(BaseEngine):
             req = order.create_cancel_request()
             order_gateway_name = order.gateway_name
             reqs.append(req)
-        self.main_engine.cancel_orders(reqs, order_gateway_name)
+        if reqs and order_gateway_name:
+            self.main_engine.cancel_orders(reqs, order_gateway_name)
 
 
     def cancel_local_stop_order(self, strategy: CtaTemplate, stop_orderid: str):
