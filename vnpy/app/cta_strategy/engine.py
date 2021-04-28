@@ -457,8 +457,9 @@ class CtaEngine(BaseEngine):
                 self.write_log(f"撤单失败，找不到委托{vt_orderid}", strategy)
                 continue
             req = order.create_cancel_request()
+            order_gateway_name = order.gateway_name
             reqs.append(req)
-        self.main_engine.cancel_orders(reqs, order.gateway_name)
+        self.main_engine.cancel_orders(reqs, order_gateway_name)
 
 
     def cancel_local_stop_order(self, strategy: CtaTemplate, stop_orderid: str):
