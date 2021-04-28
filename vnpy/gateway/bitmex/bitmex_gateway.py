@@ -7,8 +7,10 @@ import time
 from copy import copy
 from datetime import datetime, timedelta
 from threading import Lock
-from urllib.parse import urlencode
+import json
+from urllib.parse import urlencode, quote_plus
 import pytz
+from typing import Sequence
 
 from requests import ConnectionError
 
@@ -135,6 +137,12 @@ class BitmexGateway(BaseGateway):
     def cancel_order(self, req: CancelRequest):
         """"""
         self.rest_api.cancel_order(req)
+    
+    def send_orders(self, reqs: Sequence[OrderRequest]):
+        return self.rest_api.send_orders(reqs)
+
+    def cancel_orders(self, reqs: Sequence[CancelRequest]):
+        self.rest_api.cancel_orders(reqs)
 
     def query_account(self):
         """"""
@@ -197,7 +205,11 @@ class BitmexRestApi(RestClient):
             path = request.path
 
         if request.data:
-            request.data = urlencode(request.data)
+            import json
+            request.data = urlencode(request.data, encoding='utf-8')
+            # request.data = urlencode(request.data, encoding='utf-8').replace('%27','%22')
+            # request.data = quote_plus(json.dumps(request.data), encoding='utf-8')
+            # request.data = urlencode(({k: json.dumps(v) for k, v in request.data.items()}))
         else:
             request.data = ""
 
@@ -302,6 +314,67 @@ class BitmexRestApi(RestClient):
 
         self.gateway.on_order(order)
         return order.vt_orderid
+    
+    def send_orders(self, reqs: Sequence[OrderRequest]):
+        if not self.check_rate_limit():
+            return ""
+
+        orders_data = []
+        orders = []
+        vt_orderids = []
+
+        for req in reqs:
+            orderid = str(self.connect_time + self._new_order_id())
+
+            data = {
+                "symbol": req.symbol,
+                "side": DIRECTION_VT2BITMEX[req.direction],
+                "ordType": ORDERTYPE_VT2BITMEX[req.type],
+                "orderQty": int(req.volume),
+                "clOrdID": orderid,
+            }
+
+            inst = []   # Order special instructions
+
+            # Only add price for limit order.
+            if req.type == OrderType.LIMIT:
+                data["price"] = req.price
+                # TODO
+                # maybe add iceberg order
+                # "execInst": "ParticipateDoNotInitiate",
+                inst.append("ParticipateDoNotInitiate")
+            elif req.type == OrderType.STOP:
+                data["stopPx"] = req.price
+                inst.append("LastPrice")
+
+            # Check for close order
+            if req.offset == Offset.CLOSE:
+                inst.append("ReduceOnly")
+
+            # Generate execInst
+            if inst:
+                data["execInst"] = ",".join(inst)
+
+            order = req.create_order_data(orderid, self.gateway_name)
+            self.gateway.on_order(order)
+            orders_data.append(data)
+            orders.append(order)
+            vt_orderids.append(order.vt_orderid)
+        
+        datas = {"orders": json.dumps(orders_data)}
+
+        self.add_request(
+            "POST",
+            "/order/bulk",
+            callback=self.on_send_orders,
+            data=datas,
+            extra=orders,
+            on_failed=self.on_send_orders_failed,
+            on_error=self.on_send_orders_error,
+        )
+
+        return vt_orderids
+
 
     def cancel_order(self, req: CancelRequest):
         """"""
@@ -320,6 +393,28 @@ class BitmexRestApi(RestClient):
             "/order",
             callback=self.on_cancel_order,
             params=params,
+            on_error=self.on_cancel_order_error,
+        )
+    
+    def cancel_orders(self, reqs: Sequence[CancelRequest]):
+        if not self.check_rate_limit():
+            return
+        clOrdIDs = []
+        orderIDs = []
+        for req in reqs:
+            orderid = req.orderid
+            if orderid.isdigit():
+                clOrdIDs.append(orderid)
+            else:
+                orderIDs.append(orderid)
+        params = {"clOrdID": json.dumps(clOrdIDs),  "orderID": json.dumps(orderIDs)}
+
+        self.add_request(
+            "DELETE",
+            "/order",
+            callback=self.on_cancel_order,
+            # params=params,
+            data=params,
             on_error=self.on_cancel_order_error,
         )
 
@@ -411,6 +506,26 @@ class BitmexRestApi(RestClient):
 
         self.gateway.write_log(msg)
 
+    def on_send_orders_failed(self, status_code: str, request: Request):
+        """
+        Callback when sending order failed on server.
+        """
+        self.update_rate_limit(request)
+
+        orders = request.extra
+        for order in orders:
+            order.status = Status.REJECTED
+            self.gateway.on_order(order)
+
+        if request.response.text:
+            data = request.response.json()
+            error = data["error"]
+            msg = f"委托失败，状态码：{status_code}，类型：{error['name']}, 信息：{error['message']}"
+        else:
+            msg = f"委托失败，状态码：{status_code}"
+
+        self.gateway.write_log(msg)
+
     def on_send_order_error(
         self, exception_type: type, exception_value: Exception, tb, request: Request
     ):
@@ -425,9 +540,29 @@ class BitmexRestApi(RestClient):
         if not issubclass(exception_type, ConnectionError):
             self.on_error(exception_type, exception_value, tb, request)
 
+    def on_send_orders_error(
+        self, exception_type: type, exception_value: Exception, tb, request: Request
+    ):
+        """
+        Callback when sending order caused exception.
+        """
+        orders = request.extra
+        for order in orders:
+            order.status = Status.REJECTED
+            self.gateway.on_order(order)
+
+        # Record exception if not ConnectionError
+        if not issubclass(exception_type, ConnectionError):
+            self.on_error(exception_type, exception_value, tb, request)
+
     def on_send_order(self, data, request):
         """Websocket will push a new order status"""
         self.update_rate_limit(request)
+    
+    def on_send_orders(self, data, request):
+        # TODO not sure websocket updated orders type.
+        self.update_rate_limit(request)
+    
 
     def on_cancel_order_error(
         self, exception_type: type, exception_value: Exception, tb, request: Request
