@@ -218,7 +218,8 @@ class CtaEngine(BaseEngine):
         self.call_strategy_func(strategy, strategy.on_trade, trade)
 
         # Sync strategy variables to data file
-        self.sync_strategy_data(strategy)
+        # TODO stop sync to prevent io.
+        # self.sync_strategy_data(strategy)
 
         # Update GUI
         self.put_strategy_event(strategy)
