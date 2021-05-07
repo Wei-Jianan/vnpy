@@ -222,12 +222,15 @@ class WebsocketClient:
                     socket.error
                 ):
                     self._disconnect()
+                    # make sure unlimit retry connecting resulting ip banned
+                    sleep(10)
 
                 # other internal exception raised in on_packet
                 except:  # noqa
                     et, ev, tb = sys.exc_info()
                     self.on_error(et, ev, tb)
                     self._disconnect()
+                    sleep(10)
         except:  # noqa
             et, ev, tb = sys.exc_info()
             self.on_error(et, ev, tb)
