@@ -287,7 +287,7 @@ class BitmexRestApi(RestClient):
 
             # TODO
             # "execInst": "ParticipateDoNotInitiate",
-            inst.append("ParticipateDoNotInitiate")
+            # inst.append("ParticipateDoNotInitiate")
         elif req.type == OrderType.STOP:
             data["stopPx"] = req.price
             inst.append("LastPrice")
