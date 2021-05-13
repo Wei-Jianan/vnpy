@@ -22,6 +22,7 @@ INTERVAL_DELTA_MAP = {
     Interval.MINUTE: timedelta(minutes=1),
     Interval.HOUR: timedelta(hours=1),
     Interval.DAILY: timedelta(days=1),
+    Interval.TICK: timedelta(minutes=1)
 }
 
 
@@ -95,7 +96,8 @@ class BacktestingEngine:
         priceticks: Dict[str, float],
         capital: int = 0,
         end: datetime = None,
-        risk_free: float = 0
+        risk_free: float = 0,
+        inverse: bool = False
     ) -> None:
         """"""
         self.vt_symbols = vt_symbols
@@ -110,6 +112,7 @@ class BacktestingEngine:
         self.end = end
         self.capital = capital
         self.risk_free = risk_free
+        self.inverse = inverse
 
     def add_strategy(self, strategy_class: type, setting: dict) -> None:
         """"""
@@ -238,6 +241,7 @@ class BacktestingEngine:
                 self.sizes,
                 self.rates,
                 self.slippages,
+                self.inverse
             )
 
             pre_closes = daily_result.close_prices
@@ -721,7 +725,8 @@ class ContractDailyResult:
         start_pos: float,
         size: int,
         rate: float,
-        slippage: float
+        slippage: float,
+        inverse: bool
     ) -> None:
         """"""
         # If no pre_close provided on the first day,
@@ -734,8 +739,11 @@ class ContractDailyResult:
         # Holding pnl is the pnl from holding position at day start
         self.start_pos = start_pos
         self.end_pos = start_pos
-
-        self.holding_pnl = self.start_pos * (self.close_price - self.pre_close) * size
+        if not inverse:
+            self.holding_pnl = self.start_pos * (self.close_price - self.pre_close) * size
+        else:
+            self.holding_pnl = self.start_pos * \
+                (1 / self.pre_close - 1 / self.close_price) * size
 
         # Trading pnl is the pnl from new trade during the day
         self.trade_count = len(self.trades)
@@ -748,10 +756,15 @@ class ContractDailyResult:
 
             self.end_pos += pos_change
 
-            turnover = trade.volume * size * trade.price
-
-            self.trading_pnl += pos_change * (self.close_price - trade.price) * size
-            self.slippage += trade.volume * size * slippage
+            if not inverse:
+                turnover = trade.volume * size * trade.price
+                self.trading_pnl += pos_change * (self.close_price - trade.price) * size
+                self.slippage += trade.volume * size * slippage
+            else:
+                turnover = trade.volume * size / trade.price
+                self.trading_pnl += pos_change * (1 / trade.price - 1 / self.close_price) * size
+                # TODO square in CTA backtesting
+                self.slippage += trade.volume * size * slippage / (trade.price )
             self.turnover += turnover
             self.commission += turnover * rate
 
@@ -801,6 +814,7 @@ class PortfolioDailyResult:
         sizes: Dict[str, float],
         rates: Dict[str, float],
         slippages: Dict[str, float],
+        inverse: bool
     ) -> None:
         """"""
         self.pre_closes = pre_closes
@@ -811,7 +825,8 @@ class PortfolioDailyResult:
                 start_poses.get(vt_symbol, 0),
                 sizes[vt_symbol],
                 rates[vt_symbol],
-                slippages[vt_symbol]
+                slippages[vt_symbol],
+                inverse
             )
 
             self.trade_count += contract_result.trade_count
@@ -847,4 +862,16 @@ def load_bar_data(
 
     return database_manager.load_bar_data(
         symbol, exchange, interval, start, end
+    )
+
+@lru_cache(maxsize=999)
+def load_tick_data(
+    symbol: str,
+    exchange: Exchange,
+    start: datetime,
+    end: datetime
+):
+    """"""
+    return database_manager.load_tick_data(
+        symbol, exchange, start, end
     )
