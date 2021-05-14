@@ -16,13 +16,14 @@ from vnpy.trader.object import OrderData, TradeData, BarData
 from vnpy.trader.utility import round_to, extract_vt_symbol
 
 from .template import StrategyTemplate
+from .base import BacktestingMode
 
 
 INTERVAL_DELTA_MAP = {
     Interval.MINUTE: timedelta(minutes=1),
     Interval.HOUR: timedelta(hours=1),
     Interval.DAILY: timedelta(days=1),
-    Interval.TICK: timedelta(minutes=1)
+    Interval.TICK: timedelta(milliseconds=1)
 }
 
 
@@ -97,7 +98,9 @@ class BacktestingEngine:
         capital: int = 0,
         end: datetime = None,
         risk_free: float = 0,
-        inverse: bool = False
+        inverse: bool = False,
+        mode: BacktestingMode = BacktestingMode.BAR,
+        annual_days: int = 240
     ) -> None:
         """"""
         self.vt_symbols = vt_symbols
@@ -113,6 +116,9 @@ class BacktestingEngine:
         self.capital = capital
         self.risk_free = risk_free
         self.inverse = inverse
+
+        self.mode = mode
+        self.annual_days = annual_days
 
     def add_strategy(self, strategy_class: type, setting: dict) -> None:
         """"""
@@ -136,7 +142,7 @@ class BacktestingEngine:
         self.dts.clear()
 
         # Load 30 days of data each time and allow for progress update
-        progress_delta = timedelta(days=30)
+        progress_delta = timedelta(days=10)
         total_delta = self.end - self.start
         interval_delta = INTERVAL_DELTA_MAP[self.interval]
 
@@ -147,20 +153,35 @@ class BacktestingEngine:
 
             data_count = 0
             while start < self.end:
-                end = min(end, self.end)  # Make sure end time stays within set range
+                # Make sure end time stays within set range
+                end = min(end, self.end)
 
-                data = load_bar_data(
-                    vt_symbol,
-                    self.interval,
-                    start,
-                    end
-                )
+                if self.mode == BacktestingMode.BAR:
+                    data = load_bar_data(
+                        vt_symbol,
+                        self.interval,
+                        start,
+                        end
+                    )
+                    for bar in data:
+                        self.dts.add(bar.datetime)
+                        self.history_data[(bar.datetime, vt_symbol)] = bar
+                        data_count += 1
 
-                for bar in data:
-                    self.dts.add(bar.datetime)
-                    self.history_data[(bar.datetime, vt_symbol)] = bar
-                    data_count += 1
 
+                else:
+                    data = load_tick_data(vt_symbol,
+                                          strat,
+                                          end
+                                          )
+                    for tick in data:
+                        self.dts.add(tick.datetime)
+                        self.history_data[(tick.datetime, vt_symbol)] = tick
+                        data_count += 1
+
+
+
+                
                 progress += progress_delta / total_delta
                 progress = min(progress, 1)
                 progress_bar = "#" * int(progress * 10)
@@ -187,12 +208,18 @@ class BacktestingEngine:
 
         for ix, dt in enumerate(dts):
             if self.datetime and dt.day != self.datetime.day:
+
+                print("stop 1st day", dt)
                 day_count += 1
                 if day_count >= self.days:
                     break
 
             try:
-                self.new_bars(dt)
+
+                if self.mode == BacktestingMode.BAR:
+                    self.new_bars(dt)
+                else:
+                    self.new_ticks(dt)
             except Exception:
                 self.output("触发异常，回测终止")
                 self.output(traceback.format_exc())
@@ -208,7 +235,11 @@ class BacktestingEngine:
         # Use the rest of history data for running backtesting
         for dt in dts[ix:]:
             try:
-                self.new_bars(dt)
+                if self.mode == BacktestingMode.BAR:
+                    self.new_bars(dt)
+                else:
+                    self.new_ticks(dt)
+
             except Exception:
                 self.output("触发异常，回测终止")
                 self.output(traceback.format_exc())
@@ -304,7 +335,8 @@ class BacktestingEngine:
         else:
             # Calculate balance related time series data
             df["balance"] = df["net_pnl"].cumsum() + self.capital
-            df["return"] = np.log(df["balance"] / df["balance"].shift(1)).fillna(0)
+            df["return"] = np.log(
+                df["balance"] / df["balance"].shift(1)).fillna(0)
             df["highlevel"] = (
                 df["balance"].rolling(
                     min_periods=1, window=len(df), center=False).max()
@@ -327,7 +359,8 @@ class BacktestingEngine:
 
             if isinstance(max_drawdown_end, date):
                 max_drawdown_start = df["balance"][:max_drawdown_end].idxmax()
-                max_drawdown_duration = (max_drawdown_end - max_drawdown_start).days
+                max_drawdown_duration = (
+                    max_drawdown_end - max_drawdown_start).days
             else:
                 max_drawdown_duration = 0
 
@@ -353,7 +386,8 @@ class BacktestingEngine:
 
             if return_std:
                 daily_risk_free = self.risk_free / np.sqrt(240)
-                sharpe_ratio = (daily_return - daily_risk_free) / return_std * np.sqrt(240)
+                sharpe_ratio = (daily_return - daily_risk_free) / \
+                    return_std * np.sqrt(240)
             else:
                 sharpe_ratio = 0
 
@@ -446,7 +480,8 @@ class BacktestingEngine:
         fig = make_subplots(
             rows=4,
             cols=1,
-            subplot_titles=["Balance", "Drawdown", "Daily Pnl", "Pnl Distribution"],
+            subplot_titles=["Balance", "Drawdown",
+                            "Daily Pnl", "Pnl Distribution"],
             vertical_spacing=0.06
         )
 
@@ -740,7 +775,8 @@ class ContractDailyResult:
         self.start_pos = start_pos
         self.end_pos = start_pos
         if not inverse:
-            self.holding_pnl = self.start_pos * (self.close_price - self.pre_close) * size
+            self.holding_pnl = self.start_pos * \
+                (self.close_price - self.pre_close) * size
         else:
             self.holding_pnl = self.start_pos * \
                 (1 / self.pre_close - 1 / self.close_price) * size
@@ -758,13 +794,15 @@ class ContractDailyResult:
 
             if not inverse:
                 turnover = trade.volume * size * trade.price
-                self.trading_pnl += pos_change * (self.close_price - trade.price) * size
+                self.trading_pnl += pos_change * \
+                    (self.close_price - trade.price) * size
                 self.slippage += trade.volume * size * slippage
             else:
                 turnover = trade.volume * size / trade.price
-                self.trading_pnl += pos_change * (1 / trade.price - 1 / self.close_price) * size
+                self.trading_pnl += pos_change * \
+                    (1 / trade.price - 1 / self.close_price) * size
                 # TODO square in CTA backtesting
-                self.slippage += trade.volume * size * slippage / (trade.price )
+                self.slippage += trade.volume * size * slippage / (trade.price)
             self.turnover += turnover
             self.commission += turnover * rate
 
@@ -791,7 +829,8 @@ class PortfolioDailyResult:
         self.contract_results: Dict[str, ContractDailyResult] = {}
 
         for vt_symbol, close_price in close_prices.items():
-            self.contract_results[vt_symbol] = ContractDailyResult(result_date, close_price)
+            self.contract_results[vt_symbol] = ContractDailyResult(
+                result_date, close_price)
 
         self.trade_count: int = 0
         self.turnover: float = 0
@@ -864,14 +903,17 @@ def load_bar_data(
         symbol, exchange, interval, start, end
     )
 
+
 @lru_cache(maxsize=999)
 def load_tick_data(
-    symbol: str,
-    exchange: Exchange,
+
+    vt_symbol: str,
     start: datetime,
     end: datetime
 ):
     """"""
+
+    symbol, exchange = extract_vt_symbol(vt_symbol)
     return database_manager.load_tick_data(
         symbol, exchange, start, end
     )

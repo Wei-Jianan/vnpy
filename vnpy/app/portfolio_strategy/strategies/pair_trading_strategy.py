@@ -130,6 +130,7 @@ class PairTradingStrategy(StrategyTemplate):
             leg1_bar.close_price * self.leg1_ratio - leg2_bar.close_price * self.leg2_ratio
         )
 
+        # print("current spread, ", self.current_spread)
         # Update to spread array
         self.spread_data[:-1] = self.spread_data[1:]
         self.spread_data[-1] = self.current_spread
@@ -151,11 +152,11 @@ class PairTradingStrategy(StrategyTemplate):
 
         if not leg1_pos:
             if self.current_spread >= self.boll_up:
-                self.targets[self.leg1_symbol] = -1
-                self.targets[self.leg2_symbol] = 1
+                self.targets[self.leg1_symbol] = -self.fixed_size
+                self.targets[self.leg2_symbol] = self.fixed_size
             elif self.current_spread <= self.boll_down:
-                self.targets[self.leg1_symbol] = 1
-                self.targets[self.leg2_symbol] = -1
+                self.targets[self.leg1_symbol] = self.fixed_size
+                self.targets[self.leg2_symbol] = -self.fixed_size
         elif leg1_pos > 0:
             if self.current_spread >= self.boll_mid:
                 self.targets[self.leg1_symbol] = 0
