@@ -601,6 +601,10 @@ class BacktestingEngine:
                 order.status = Status.NOTTRADED
                 self.strategy.update_order(order)
 
+            # make sure order filled with same symbol
+            if order.vt_symbol != self.tick.vt_symbol:
+                continue
+
             # Check whether limit orders can be filled.
             long_cross = (
                 order.direction == Direction.LONG
