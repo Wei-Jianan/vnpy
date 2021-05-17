@@ -513,7 +513,10 @@ class BacktestingEngine:
 
         close_prices = {}
         if not isinstance(bars, Dict):
-            close_prices[bars.vt_symbol] = bars.last_price
+            if bars.last_price != 0:
+                close_prices[bars.vt_symbol] = bars.last_price
+            else:
+                return
         else:
             for bar in bars.values():
                 close_prices[bar.vt_symbol] = bar.close_price
@@ -602,7 +605,7 @@ class BacktestingEngine:
                 self.strategy.update_order(order)
 
             # make sure order filled with same symbol
-            if order.vt_symbol != self.tick.vt_symbol:
+            if self.mode == BacktestingMode.TICK and order.vt_symbol != self.tick.vt_symbol:
                 continue
 
             # Check whether limit orders can be filled.
