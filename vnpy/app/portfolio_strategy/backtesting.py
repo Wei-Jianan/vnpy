@@ -1,6 +1,6 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Union
 from functools import lru_cache
 from copy import copy
 import traceback
@@ -12,7 +12,7 @@ from pandas import DataFrame
 
 from vnpy.trader.constant import Direction, Offset, Interval, Status
 from vnpy.trader.database import database_manager
-from vnpy.trader.object import OrderData, TradeData, BarData
+from vnpy.trader.object import OrderData, TradeData, BarData, TickData
 from vnpy.trader.utility import round_to, extract_vt_symbol
 
 from .template import StrategyTemplate
@@ -171,7 +171,7 @@ class BacktestingEngine:
 
                 else:
                     data = load_tick_data(vt_symbol,
-                                          strat,
+                                          start,
                                           end
                                           )
                     for tick in data:
@@ -208,15 +208,12 @@ class BacktestingEngine:
 
         for ix, dt in enumerate(dts):
             if self.datetime and dt.day != self.datetime.day:
-
-                print("stop 1st day", dt)
                 day_count += 1
                 if day_count >= self.days:
                     break
-
             try:
-
                 if self.mode == BacktestingMode.BAR:
+
                     self.new_bars(dt)
                 else:
                     self.new_ticks(dt)
@@ -510,16 +507,19 @@ class BacktestingEngine:
         fig.update_layout(height=1000, width=1000)
         fig.show()
 
-    def update_daily_close(self, bars: Dict[str, BarData], dt: datetime) -> None:
+    def update_daily_close(self, bars: Union[Dict[str, BarData], TickData], dt: datetime) -> None:
         """"""
         d = dt.date()
 
         close_prices = {}
-        for bar in bars.values():
-            close_prices[bar.vt_symbol] = bar.close_price
+        if not isinstance(bars, Dict):
+            close_prices[bars.vt_symbol] = bars.last_price
+        else:
+            for bar in bars.values():
+                close_prices[bar.vt_symbol] = bar.close_price
 
         daily_result = self.daily_results.get(d, None)
-
+        # print("type", type(bars), "update dayly close", close_prices)
         if daily_result:
             daily_result.update_close_prices(close_prices)
         else:
@@ -556,18 +556,45 @@ class BacktestingEngine:
         self.strategy.on_bars(self.bars)
 
         self.update_daily_close(self.bars, dt)
+    
+    def new_ticks(self, dt: datetime) -> None:
+        self.datetime = dt
+
+        # self.bars.clear()
+        for vt_symbol in self.vt_symbols:
+            tick = self.history_data.get((dt, vt_symbol), None)
+
+            # If bar data of vt_symbol at dt exists
+            if tick:
+                self.tick = tick
+
+                self.cross_limit_order()
+                self.strategy.on_tick(tick)
+
+                self.update_daily_close(self.tick, dt)
+    
+        
 
     def cross_limit_order(self) -> None:
         """
         Cross limit order with last bar/tick data.
         """
-        for order in list(self.active_limit_orders.values()):
-            bar = self.bars[order.vt_symbol]
 
-            long_cross_price = bar.low_price
-            short_cross_price = bar.high_price
-            long_best_price = bar.open_price
-            short_best_price = bar.open_price
+        if self.mode == BacktestingMode.TICK:
+
+            long_cross_price = self.tick.ask_price_1
+            short_cross_price = self.tick.bid_price_1
+            long_best_price = long_cross_price
+            short_best_price = short_cross_price
+
+        for order in list(self.active_limit_orders.values()):
+            if self.mode == BacktestingMode.BAR:
+                bar = self.bars[order.vt_symbol]
+
+                long_cross_price = bar.low_price
+                short_cross_price = bar.high_price
+                long_best_price = bar.open_price
+                short_best_price = bar.open_price
 
             # Push order update with status "not traded" (pending).
             if order.status == Status.SUBMITTING:
@@ -881,12 +908,19 @@ class PortfolioDailyResult:
 
     def update_close_prices(self, close_prices: Dict[str, float]) -> None:
         """"""
-        self.close_prices = close_prices
 
         for vt_symbol, close_price in close_prices.items():
+
+            self.close_prices[vt_symbol] = close_price
             contract_result = self.contract_results.get(vt_symbol, None)
             if contract_result:
                 contract_result.update_close_price(close_price)
+            else:
+                self.contract_results[vt_symbol] = ContractDailyResult(
+                    self.date, close_price)
+
+
+                
 
 
 @lru_cache(maxsize=999)
