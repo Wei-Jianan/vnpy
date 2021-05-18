@@ -100,7 +100,8 @@ class BacktestingEngine:
         risk_free: float = 0,
         inverse: bool = False,
         mode: BacktestingMode = BacktestingMode.BAR,
-        annual_days: int = 240
+        annual_days: int = 240,
+        latency_mili: int = 0
     ) -> None:
         """"""
         self.vt_symbols = vt_symbols
@@ -119,6 +120,7 @@ class BacktestingEngine:
 
         self.mode = mode
         self.annual_days = annual_days
+        self.latency = timedelta(milliseconds=latency_mili)
 
     def add_strategy(self, strategy_class: type, setting: dict) -> None:
         """"""
@@ -590,6 +592,7 @@ class BacktestingEngine:
             long_best_price = long_cross_price
             short_best_price = short_cross_price
 
+
         for order in list(self.active_limit_orders.values()):
             if self.mode == BacktestingMode.BAR:
                 bar = self.bars[order.vt_symbol]
@@ -605,7 +608,10 @@ class BacktestingEngine:
                 self.strategy.update_order(order)
 
             # make sure order filled with same symbol
-            if self.mode == BacktestingMode.TICK and order.vt_symbol != self.tick.vt_symbol:
+            if self.mode == BacktestingMode.TICK and order.vt_symbol != self.tick.vt_symbol   :
+                continue
+            if self.mode == BacktestingMode.TICK and (self.tick.datetime - order.datetime) < self.latency:
+                print("latency pass! order: {}, tick: {}".format(order, self.tick))
                 continue
 
             # Check whether limit orders can be filled.
