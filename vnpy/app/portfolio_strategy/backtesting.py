@@ -144,7 +144,7 @@ class BacktestingEngine:
         self.dts.clear()
 
         # Load 30 days of data each time and allow for progress update
-        progress_delta = timedelta(days=10)
+        progress_delta = timedelta(days=1)
         total_delta = self.end - self.start
         interval_delta = INTERVAL_DELTA_MAP[self.interval]
 
