@@ -141,7 +141,9 @@ class BacktesterEngine(BaseEngine):
         pricetick: float,
         capital: int,
         inverse: bool,
-        setting: dict
+        setting: dict,
+        risk_free: float,
+        annual_days: int,
     ):
         """"""
         self.result_df = None
@@ -166,7 +168,9 @@ class BacktesterEngine(BaseEngine):
             pricetick=pricetick,
             capital=capital,
             inverse=inverse,
-            mode=mode
+            mode=mode,
+            risk_free=risk_free,
+            annual_days=annual_days
         )
 
         strategy_class = self.classes[class_name]

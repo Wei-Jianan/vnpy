@@ -92,7 +92,9 @@ class BacktestingEngine:
         pricetick: float,
         capital: int = 0,
         end: datetime = None,
-        mode: BacktestingMode = BacktestingMode.BAR
+        mode: BacktestingMode = BacktestingMode.BAR,
+        inverse: bool = False
+
     ):
         """"""
         self.spread = spread
@@ -105,6 +107,7 @@ class BacktestingEngine:
         self.capital = capital
         self.end = end
         self.mode = mode
+        self.inverse = inverse
 
     def add_strategy(self, strategy_class: type, setting: dict):
         """"""
@@ -204,7 +207,8 @@ class BacktestingEngine:
                 start_pos,
                 self.size,
                 self.rate,
-                self.slippage
+                self.slippage,
+                self.inverse
             )
 
             pre_close = daily_result.close_price
@@ -657,7 +661,8 @@ class DailyResult:
         start_pos: float,
         size: int,
         rate: float,
-        slippage: float
+        slippage: float,
+        inverse: bool
     ):
         """"""
         # If no pre_close provided on the first day,
@@ -670,8 +675,12 @@ class DailyResult:
         # Holding pnl is the pnl from holding position at day start
         self.start_pos = start_pos
         self.end_pos = start_pos
+        if not inverse:
+            self.holding_pnl = self.start_pos * (self.close_price - self.pre_close) * size
+        else:
+            self.holding_pnl = self.start_pos * \
+                (1 / self.pre_close - 1 / self.close_price) * size / 30
 
-        self.holding_pnl = self.start_pos * (self.close_price - self.pre_close) * size
 
         # Trading pnl is the pnl from new trade during the day
         self.trade_count = len(self.trades)
@@ -683,11 +692,17 @@ class DailyResult:
                 pos_change = -trade.volume
 
             self.end_pos += pos_change
-
-            turnover = trade.volume * size * trade.value
-            self.trading_pnl += pos_change * \
-                (self.close_price - trade.price) * size
-            self.slippage += trade.volume * size * slippage
+            if not inverse:
+                turnover = trade.volume * size * trade.value
+                self.trading_pnl += pos_change * \
+                    (self.close_price - trade.price) * size
+                self.slippage += trade.volume * size * slippage
+            else:
+                turnover = trade.volume * size / trade.price
+                self.trading_pnl += pos_change * \
+                    (1 / trade.price - 1 / self.close_price) * size / 30
+                # TODO why square trade.price in CTA backtesting engine
+                self.slippage += trade.volume * size * slippage / (trade.price ) 
 
             self.turnover += turnover
             self.commission += turnover * rate
